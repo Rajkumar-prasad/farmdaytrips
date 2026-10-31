@@ -16,6 +16,7 @@ const DIRS = ["agritourism", "onfarmmarket", "farmersmarket"];
 const config = JSON.parse(readFileSync("data/config.json", "utf8"));
 const onlyStates = (process.env.STATES || config.states.join(",")).split(",").map((s) => s.trim()).filter(Boolean);
 const MAX_PHOTOS = +(process.env.MAX_PHOTOS || 4000);
+const PHOTOS_ONLY = process.env.PHOTOS_ONLY === "1";
 
 mkdirSync("data/enrich", { recursive: true });
 mkdirSync("src/photos", { recursive: true });
@@ -60,6 +61,10 @@ let imagePath = null;
   const m = js && js.toString().match(/image_path\s*=\s*["']([^"']+)["']/);
   imagePath = m ? m[1].replace(/\/$/, "") : null;
   if (imagePath && imagePath.startsWith("/")) imagePath = "https://www.usdalocalfoodportal.com" + imagePath;
+  // The site builds it as home_url + "/mywp/uploadimages".
+  const m2 = js && js.toString().match(/image_path\s*=\s*home_url\s*\+\s*["']([^"']+)["']/);
+  if (!imagePath && m2) imagePath = "https://www.usdalocalfoodportal.com" + m2[1].replace(/\/$/, "");
+  imagePath ||= "https://www.usdalocalfoodportal.com/mywp/uploadimages";
   console.log("image path:", imagePath);
 }
 
@@ -68,9 +73,10 @@ let photos = 0;
 
 for (const st of onlyStates) {
   const name = STATES[st];
-  const out = {};
   const prevFile = `data/enrich/${st}.json`;
   const prev = existsSync(prevFile) ? JSON.parse(readFileSync(prevFile, "utf8")) : {};
+  const out = PHOTOS_ONLY ? JSON.parse(JSON.stringify(prev)) : {};
+  if (!PHOTOS_ONLY) {
 
   // 1) Contact details from the search endpoint (plain text there).
   for (const dir of DIRS) {
@@ -119,6 +125,8 @@ for (const st of onlyStates) {
     const sales = lines(d.saleschannel);
     if (sales.length) e.sales = sales;
   });
+
+  }
 
   // 3) Photos: download, resize and store as small WebP files.
   if (imagePath) {
