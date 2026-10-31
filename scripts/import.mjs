@@ -1,6 +1,6 @@
 // Turns data/usda.json (all US) into data/listings.json for the states in data/config.json.
 // Run: node scripts/import.mjs
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { STATES, STATE_BY_NAME, CATEGORIES, slugify, titleCase, cleanText } from "./lib.mjs";
 
 const config = JSON.parse(readFileSync("data/config.json", "utf8"));
@@ -69,6 +69,47 @@ function splitList(s) {
   return String(s || "").split(";").map((x) => cleanText(x)).filter(Boolean);
 }
 
+// Enrichment (contacts, seasons, photos) collected by scripts/enrich-usda.mjs.
+const enrich = {};
+for (const st of wanted) {
+  const f = `data/enrich/${st}.json`;
+  if (existsSync(f)) Object.assign(enrich, JSON.parse(readFileSync(f, "utf8")));
+}
+
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const MONTHNAMES = "January|February|March|April|May|June|July|August|September|October|November|December";
+const RE_DATES = /^(\d{2})\/(\d{2})\/(\d{4}) to (\d{2})\/(\d{2})\/(\d{4})$/;
+const RE_MONTHS = new RegExp(`^(${MONTHNAMES})( to (${MONTHNAMES}))?$`);
+const RE_DAY = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)s?:\s*(.+)$/;
+const HEADINGS = /^(Available products|Hands-on farm activities and experiences|Educational tours\/classes\/exhibits|Agri-entertainment|Food and beverage service|Overnight farm stays|Outdoor recreation|Events|Other activities|Other products)$/i;
+
+// Turns the USDA "seasons" text into structured seasons.
+function parseSeasons(lines) {
+  if (!lines?.length) return [];
+  const seasons = [];
+  let cur = null, group = null, pendingLabel = null;
+  const start = (label, when) => { cur = { label: label || null, ...when, hours: [], groups: [], notes: [] }; seasons.push(cur); group = null; };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    let m;
+    if ((m = l.match(RE_DATES))) { start(pendingLabel, { from: `${m[3]}-${m[1]}-${m[2]}`, to: `${m[6]}-${m[4]}-${m[5]}`, year: +m[3] }); pendingLabel = null; continue; }
+    if ((m = l.match(RE_MONTHS))) { start(pendingLabel, { months: m[3] ? `${m[1]} to ${m[3]}` : m[1] }); pendingLabel = null; continue; }
+    const next = lines[i + 1] || "";
+    if (!HEADINGS.test(l) && !RE_DAY.test(l) && !/closed|open|call|appointment/i.test(l) && (RE_DATES.test(next) || RE_MONTHS.test(next)) && l.length < 60) { pendingLabel = l; continue; }
+    if (!cur) start(null, {});
+    if ((m = l.match(RE_DAY))) { cur.hours.push({ day: m[1], time: m[2].replace(/\s*-\s*/, " - ") }); group = null; continue; }
+    if (HEADINGS.test(l)) { group = { title: l.replace(/^Available products$/i, "Products"), items: [] }; cur.groups.push(group); continue; }
+    if (group && l.length <= 60 && !/closed|open |call|appointment|please|www\.|http/i.test(l)) {
+      group.items.push(...l.split(/,\s*/).map((x) => x.trim()).filter(Boolean));
+      continue;
+    }
+    if (l.length > 3) cur.notes.push(l);
+    group = null;
+  }
+  for (const s of seasons) for (const g of s.groups) g.items = [...new Set(g.items)];
+  return seasons.filter((s) => s.hours.length || s.groups.some((g) => g.items.length) || s.notes.length || s.from || s.months);
+}
+
 // Pass 2: normalize.
 const out = [];
 const seen = new Map();
@@ -79,7 +120,10 @@ for (const { r, p } of rows) {
   const city = p.city && !/\d/.test(p.city) ? titleCase(p.city) : null;
   const lat = parseFloat(r.location_y), lng = parseFloat(r.location_x);
   const type = r.directory === "farmersmarket" ? "market" : "farm";
-  const text = (name + " " + desc + " " + (r.services || "")).toLowerCase();
+  const e = enrich[`${r.directory}-${r.listing_id}`] || {};
+  const seasons = parseSeasons(e.season);
+  const seasonText = seasons.map((x) => [x.label, ...x.groups.flatMap((g) => g.items), ...x.notes].join(" ")).join(" ");
+  const text = (name + " " + desc + " " + (r.services || "") + " " + seasonText).toLowerCase();
   const categories = CATEGORIES.filter((c) => c.test(text)).map((c) => c.slug);
   if (r.directory === "farmersmarket") categories.push("farmers-markets");
   if (r.directory === "onfarmmarket") categories.push("farm-stands");
@@ -102,6 +146,14 @@ for (const { r, p } of rows) {
     payment: splitList(r.acceptedpayment),
     practices: splitList(r.specialproductionmethods),
     indoor: r.location_indoor ? cleanText(r.location_indoor) : null,
+    phone: e.phone || null,
+    website: e.website || null,
+    facebook: e.facebook || null,
+    instagram: e.instagram || null,
+    photo: e.photo || null,
+    seasons,
+    snap: (e.fnap || []).filter((x) => x.length < 40),
+    usdaUrl: `https://www.usdalocalfoodportal.com/fe/flisting/?lid=${r.listing_id}&directory_type=${r.directory}`,
     updated: r.update_time ? r.update_time.slice(0, 10) : null,
     source: "USDA Local Food Directories",
   };
@@ -112,7 +164,9 @@ for (const { r, p } of rows) {
     const prev = seen.get(key);
     prev.categories = [...new Set([...prev.categories, ...listing.categories])];
     if (!prev.description && listing.description) prev.description = listing.description;
-    for (const f of ["facilities", "services", "payment", "practices"]) prev[f] = [...new Set([...prev[f], ...listing[f]])];
+    for (const f of ["facilities", "services", "payment", "practices", "snap"]) prev[f] = [...new Set([...prev[f], ...listing[f]])];
+    for (const f of ["phone", "website", "facebook", "instagram", "photo"]) prev[f] ||= listing[f];
+    if (!prev.seasons.length) prev.seasons = listing.seasons;
     continue;
   }
   seen.set(key, listing);
@@ -134,7 +188,7 @@ writeFileSync("data/listings.json", JSON.stringify(out, null, 1) + "\n");
 
 const byState = {};
 for (const l of out) {
-  const s = (byState[l.state] ||= { total: 0, noCity: 0, described: 0 });
-  s.total++; if (!l.city) s.noCity++; if (l.description) s.described++;
+  const s = (byState[l.state] ||= { total: 0, described: 0, phone: 0, web: 0, seasons: 0, photo: 0 });
+  s.total++; if (l.description) s.described++; if (l.phone) s.phone++; if (l.website || l.facebook) s.web++; if (l.seasons.length) s.seasons++; if (l.photo) s.photo++;
 }
 console.log("Imported", out.length, "listings", byState);

@@ -1,6 +1,6 @@
 // Static site generator for farmdaytrips.com. Zero dependencies.
 // Run: node scripts/build.mjs   ->  writes the site into public/
-import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, existsSync, cpSync } from "node:fs";
 import { dirname } from "node:path";
 import { STATES, CATEGORIES, CAT, MONTHS, slugify, esc, listJoin } from "./lib.mjs";
 
@@ -23,8 +23,17 @@ for (const l of listings) {
   l.stateSlug = slugify(l.stateName);
   l.citySlug = l.city ? slugify(l.city) : null;
   // A full page only when there is enough real information to be useful.
+  l.seasons ||= []; l.snap ||= [];
+  if (l.photo && !existsSync("src" + l.photo)) l.photo = null;
   const extras = l.facilities.length + l.services.length + l.payment.length + (l.directions ? 1 : 0);
-  l.hasPage = !!(l.description && (l.description.length >= 100 || (l.description.length >= 50 && extras >= 2)));
+  const contact = !!(l.phone || l.website || l.facebook);
+  const seasonInfo = l.seasons.some((x) => x.hours.length || x.groups.some((g) => g.items.length));
+  l.hasPage = !!(
+    (l.description && (l.description.length >= 100 || (l.description.length >= 50 && (extras >= 2 || contact)))) ||
+    (contact && seasonInfo) ||
+    (contact && l.photo && (l.description || extras >= 2))
+  );
+  l.img = l.photo || `/img/${["christmas-tree-farms", "pumpkin-patches", "apple-orchards", "strawberry-picking", "berry-picking", "corn-mazes", "u-pick-farms", "farmers-markets", "farm-stands"].find((c) => l.categories.includes(c)) || "farm"}.svg`;
   l.url = l.hasPage ? `/farm/${l.slug}/` : null;
   l.mapUrl = l.lat
     ? `https://www.google.com/maps/dir/?api=1&destination=${l.lat},${l.lng}`
@@ -148,12 +157,15 @@ function card(l, showState = false) {
   const where = [l.street, l.city, showState ? l.state : null].filter(Boolean).join(", ");
   const nameHtml = l.url ? `<a href="${l.url}">${esc(l.name)}</a>` : esc(l.name);
   const blurb = l.description ? `<p style="margin:0;font-size:.93rem">${esc(l.description.length > 150 ? l.description.slice(0, 147).replace(/\s+\S*$/, "") + "..." : l.description)}</p>` : "";
+  const img = `<img class="thumb${l.photo ? "" : " art"}" src="${l.img}" alt="${l.photo ? esc(l.name) : ""}" loading="lazy" width="360" height="200">`;
   return `<article class="card">
+${l.url ? `<a href="${l.url}" tabindex="-1" aria-hidden="true">${img}</a>` : img}
 <h3>${nameHtml}</h3>
 <div class="addr">${esc(where || l.stateName)}${l.zip ? " " + esc(l.zip) : ""}</div>
+${l.phone ? `<div class="addr"><a href="tel:${l.phone.replace(/\D/g, "")}">${esc(l.phone)}</a></div>` : ""}
 <div class="tags">${tagsFor(l)}</div>
 ${blurb}
-<div class="more">${l.url ? `<a href="${l.url}">View details</a> &middot; ` : ""}<a href="${l.mapUrl}" rel="nofollow noopener" target="_blank">Directions</a></div>
+<div class="more">${l.url ? `<a href="${l.url}">View details</a> &middot; ` : ""}<a href="${l.mapUrl}" rel="nofollow noopener" target="_blank">Directions</a>${!l.url && (l.website || l.facebook) ? ` &middot; <a href="${esc(l.website || l.facebook)}" rel="nofollow noopener" target="_blank">Website</a>` : ""}</div>
 </article>`;
 }
 
@@ -191,6 +203,8 @@ function write(path, html) {
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 copyFileSync("src/styles.css", OUT + "/styles.css");
+cpSync("src/img", OUT + "/img", { recursive: true });
+if (existsSync("src/photos")) cpSync("src/photos", OUT + "/photos", { recursive: true });
 writeFileSync(OUT + "/favicon.svg", ICON.replace('width="26" height="26" ', 'xmlns="http://www.w3.org/2000/svg" '));
 
 // ---------- page builders ----------
@@ -346,22 +360,54 @@ for (const l of listings.filter((x) => x.hasPage)) {
   const near = l.lat ? listings.filter((o) => o !== l && o.lat).map((o) => ({ o, d: dist(l, o) })).sort((a, b) => a.d - b.d).slice(0, 6) : [];
   const facts = [
     ["Address", [l.street, l.city, `${l.state}${l.zip ? " " + l.zip : ""}`].filter(Boolean).join(", ")],
+    l.phone ? ["Phone", l.phone] : null,
     ["Type", l.categories.filter((c) => CAT[c]).map((c) => CAT[c].short).join(", ") || (l.type === "market" ? "Farmers market" : "Farm")],
     l.facilities.length ? ["Facilities", l.facilities.join(", ")] : null,
     l.services.length ? ["Services", l.services.join(", ")] : null,
     l.payment.length ? ["Payment", l.payment.join(", ")] : null,
+    l.snap.length ? ["Food assistance", l.snap.join(", ")] : null,
     l.practices.length ? ["Growing practices", l.practices.join(", ")] : null,
     l.updated ? ["Listing last updated", l.updated] : null,
   ].filter(Boolean);
   const crumbs = [{ name: S.name, path: statePath }];
   if (cityPage) crumbs.push({ name: cityPage.name, path: `${statePath}${cityPage.slug}/` });
   crumbs.push({ name: l.name, path: l.url });
+
+  const thisYear = NOW.getFullYear();
+  const fmt = (d) => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const seasons = l.seasons.filter((x) => !x.year || x.year >= thisYear - 1).length ? l.seasons.filter((x) => !x.year || x.year >= thisYear - 1) : l.seasons.slice(-1);
+  const seasonHtml = seasons.map((x) => {
+    const when = x.from ? `${fmt(x.from)} to ${fmt(x.to)}, ${x.year}` : x.months || "";
+    const stale = x.year && x.year < thisYear - 1;
+    return `<div class="season">
+${x.label || when ? `<h3>${esc(x.label || "Season")}${when ? ` <small>${esc(when)}</small>` : ""}</h3>` : ""}
+${stale ? `<p class="muted">These are the dates the farm last listed (${x.year}). Check with the farm for this year's season.</p>` : ""}
+${x.hours.length ? `<table class="hours"><tbody>${x.hours.map((h) => `<tr><th>${esc(h.day)}</th><td>${esc(h.time)}</td></tr>`).join("")}</tbody></table>` : ""}
+${x.groups.filter((g) => g.items.length).map((g) => `<p><strong>${esc(g.title)}:</strong> ${esc(g.items.join(", "))}</p>`).join("")}
+${x.notes.map((n) => `<p>${esc(n)}</p>`).join("")}
+</div>`;
+  }).join("");
+
+  const summary = l.description || `${l.name} is a ${l.type === "market" ? "farmers market" : (l.categories.filter((c) => CAT[c]).map((c) => CAT[c].short.toLowerCase())[0] || "farm") + " stop"} in ${[l.city, S.name].filter(Boolean).join(", ")}.${seasons[0]?.groups.length ? ` Visitors can find ${listJoin(seasons.flatMap((x) => x.groups.flatMap((g) => g.items)).slice(0, 5).map((x) => x.toLowerCase()))}.` : ""}`;
+  const links = [
+    l.website ? `<a class="btn ghost" href="${esc(l.website)}" rel="nofollow noopener" target="_blank">Website</a>` : "",
+    l.facebook ? `<a class="btn ghost" href="${esc(l.facebook)}" rel="nofollow noopener" target="_blank">Facebook</a>` : "",
+    l.instagram ? `<a class="btn ghost" href="${esc(l.instagram)}" rel="nofollow noopener" target="_blank">Instagram</a>` : "",
+  ].join(" ");
+
+  const days = { Monday: "Mo", Tuesday: "Tu", Wednesday: "We", Thursday: "Th", Friday: "Fr", Saturday: "Sa", Sunday: "Su" };
+  const to24 = (t) => { const m = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i); if (!m) return null; let h = +m[1] % 12; if (/pm/i.test(m[3])) h += 12; return `${String(h).padStart(2, "0")}:${m[2]}`; };
+  const hoursSpec = seasons.flatMap((x) => x.hours.map((h) => { const [a, b] = h.time.split(" - ").map(to24); return a && b ? { "@type": "OpeningHoursSpecification", dayOfWeek: h.day, opens: a, closes: b, ...(x.from ? { validFrom: x.from, validThrough: x.to } : {}) } : null; })).filter(Boolean);
   const biz = {
     "@context": "https://schema.org", "@type": "LocalBusiness", name: l.name, url: SITE.url + l.url,
-    description: l.description,
+    description: summary,
+    image: SITE.url + l.img,
+    ...(l.phone ? { telephone: l.phone } : {}),
     address: { "@type": "PostalAddress", streetAddress: l.street || undefined, addressLocality: l.city || undefined, addressRegion: l.state, postalCode: l.zip || undefined, addressCountry: "US" },
     ...(l.lat ? { geo: { "@type": "GeoCoordinates", latitude: l.lat, longitude: l.lng } } : {}),
     ...(l.payment.length ? { paymentAccepted: l.payment.join(", ") } : {}),
+    ...([l.website, l.facebook, l.instagram].filter(Boolean).length ? { sameAs: [l.website, l.facebook, l.instagram].filter(Boolean) } : {}),
+    ...(hoursSpec.length ? { openingHoursSpecification: hoursSpec } : {}),
   };
   const body = `<section class="wrap page-head">
 <h1>${esc(l.name)}</h1>
@@ -370,24 +416,26 @@ for (const l of listings.filter((x) => x.hasPage)) {
 </section>
 <section class="wrap detail">
 <div>
+<figure class="hero-img${l.photo ? "" : " art"}"><img src="${l.img}" alt="${l.photo ? esc(l.name) : ""}" width="720" height="400">${l.photo ? `<figcaption>Photo shared by the farm in the USDA Local Food Directories</figcaption>` : ""}</figure>
 <div class="box">
 <h2 style="margin-top:0">About ${esc(l.name)}</h2>
-<p>${esc(l.description)}</p>
+<p>${esc(summary)}</p>
 ${l.directions ? `<h3>Getting there</h3><p>${esc(l.directions)}</p>` : ""}
-<p style="margin-top:16px"><a class="btn" href="${l.mapUrl}" rel="nofollow noopener" target="_blank">Get directions</a></p>
+<p class="actions"><a class="btn" href="${l.mapUrl}" rel="nofollow noopener" target="_blank">Get directions</a>${l.phone ? ` <a class="btn ghost" href="tel:${l.phone.replace(/\D/g, "")}">Call ${esc(l.phone)}</a>` : ""} ${links}</p>
 </div>
+${seasonHtml ? `<div class="box" style="margin-top:20px"><h2 style="margin-top:0">Seasons, hours &amp; what's available</h2>${seasonHtml}</div>` : ""}
 <div class="ad-slot"></div>
 ${near.length ? `<h2>Nearby farm stops</h2><div class="grid">${near.map((x) => card(x.o)).join("\n")}</div>` : ""}
 </div>
 <aside>
-<div class="box"><ul class="facts">${facts.map(([k, v]) => `<li><span>${esc(k)}</span><strong>${esc(v)}</strong></li>`).join("")}</ul></div>
-<p class="notice" style="margin-top:14px">Details come from the ${esc(l.source)}. Seasons and hours change, so confirm with the farm before visiting. Own this farm? <a href="/add-your-farm/">Update this listing</a>.</p>
+<div class="box"><ul class="facts">${facts.map(([k, v]) => `<li><span>${esc(k)}</span><strong>${k === "Phone" ? `<a href="tel:${v.replace(/\D/g, "")}">${esc(v)}</a>` : esc(v)}</strong></li>`).join("")}</ul></div>
+<p class="notice" style="margin-top:14px">Details come from the <a href="${esc(l.usdaUrl || "https://www.usdalocalfoodportal.com/")}" rel="nofollow noopener" target="_blank">${esc(l.source)}</a>. Seasons and hours change, so confirm with the farm before visiting. Own this farm? <a href="/add-your-farm/">Update this listing</a>.</p>
 </aside>
 </section>`;
   write(l.url, layout({
     path: l.url,
-    title: `${l.name} - ${[l.city, l.state].filter(Boolean).join(", ")}`,
-    description: (l.description.length > 155 ? l.description.slice(0, 152).replace(/\s+\S*$/, "") + "..." : l.description),
+    title: `${l.name} - ${[l.city, l.state].filter(Boolean).join(", ")}${l.phone || hoursSpec.length ? " | Hours, Phone & Directions" : ""}`,
+    description: (summary.length > 155 ? summary.slice(0, 152).replace(/\s+\S*$/, "") + "..." : summary),
     crumbs,
     body,
     schema: [biz],

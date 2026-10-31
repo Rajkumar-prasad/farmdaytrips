@@ -96,3 +96,19 @@ details p{margin:.6em 0 0;color:var(--muted)}
 .site-foot ul{list-style:none;padding:0;margin:0}
 .site-foot li{margin:4px 0}
 .hidden{display:none}
+
+/* images */
+.card .thumb{display:block;width:calc(100% + 36px);margin:-18px -18px 6px;height:150px;object-fit:cover;border-radius:var(--radius) var(--radius) 0 0;background:#eef3e6}
+.card .thumb.art{object-fit:contain}
+.hero-img{margin:0 0 20px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);background:#eef3e6}
+.hero-img img{display:block;width:100%;height:auto;max-height:420px;object-fit:cover}
+.hero-img.art img{max-height:260px;object-fit:contain}
+.hero-img figcaption{font-size:.8rem;color:var(--muted);padding:6px 12px;background:var(--surface)}
+.actions{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+.season{padding:14px 0;border-top:1px solid var(--line)}
+.season:first-of-type{border-top:0;padding-top:0}
+.season h3 small{font-family:var(--sans);font-size:.85rem;color:var(--muted);font-weight:400;margin-left:6px}
+.hours{border-collapse:collapse;margin:6px 0 10px;font-size:.93rem}
+.hours th{text-align:left;font-weight:600;padding:3px 18px 3px 0}
+.hours td{padding:3px 0;color:var(--muted)}
+.muted{color:var(--muted);font-size:.9rem}
