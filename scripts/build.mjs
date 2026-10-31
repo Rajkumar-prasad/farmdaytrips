@@ -40,6 +40,11 @@ for (const l of listings) {
     : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([l.name, l.street, l.city, l.state, l.zip].filter(Boolean).join(", "))}`;
 }
 
+const PHOTO_SCORES = existsSync("data/photo-scores.json") ? JSON.parse(readFileSync("data/photo-scores.json", "utf8")) : {};
+for (const l of listings) {
+  const key = l.photo ? l.photo.replace(/^\/photos\/|\.webp$/g, "") : null;
+  l.realPhoto = !!(key && (PHOTO_SCORES[key] == null || PHOTO_SCORES[key] >= 6));
+}
 const byState = group(listings, (l) => l.state);
 const pages = []; // for sitemap
 
@@ -87,7 +92,19 @@ for (const st of config.states) {
 // ---------- templates ----------
 const ICON = `<svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="18" r="11" fill="#c4501f"/><path d="M16 7c0-3 2-5 5-5-1 3-2 4-5 5z" fill="#2f5d34"/><path d="M16 8v4" stroke="#5a3a1a" stroke-width="2" stroke-linecap="round"/></svg>`;
 
-function layout({ path, title, description, body, crumbs = [], schema = [], noindex = false }) {
+const SITE_IMG = {
+  "christmas-tree-farms": "/img/site/christmas-tree-picking.webp",
+  "pumpkin-patches": "/img/site/pumpkins.webp",
+  "strawberry-picking": "/img/site/strawberries.webp",
+  "berry-picking": "/img/site/strawberries.webp",
+  "u-pick-farms": "/img/site/strawberries.webp",
+};
+const SEASON_IMG = MONTH >= 11 ? "/img/site/christmas-tree-decorated.webp" : MONTH >= 9 ? "/img/site/pumpkins.webp" : "/img/site/strawberries.webp";
+const catImg = (slug) => SITE_IMG[slug] || SEASON_IMG;
+const catIcon = (slug) => `/img/${CAT[slug] ? slug : "farm"}.svg`;
+const PIN = `<svg width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><path d="M6 0a6 6 0 0 0-6 6c0 4.2 6 8 6 8s6-3.8 6-8a6 6 0 0 0-6-6zm0 8.2A2.2 2.2 0 1 1 6 3.8a2.2 2.2 0 0 1 0 4.4z" fill="#d23c2c"/></svg>`;
+
+function layout({ path, title, description, body, crumbs = [], schema = [], noindex = false, banner = null }) {
   const canonical = SITE.url + path;
   const bc = crumbs.length
     ? {
@@ -100,6 +117,17 @@ function layout({ path, title, description, body, crumbs = [], schema = [], noin
     ? `<nav class="crumbs wrap" aria-label="Breadcrumb"><a href="/">Home</a>${crumbs.map((c, i) => `<span>/</span>${i === crumbs.length - 1 ? esc(c.name) : `<a href="${c.path}">${esc(c.name)}</a>`}`).join("")}</nav>`
     : "";
   if (!noindex) pages.push(path);
+  // Turn the first page-head section into a photo banner with breadcrumbs inside.
+  let crumbsOut = crumbHtml;
+  if (body.trimStart().startsWith('<section class="wrap page-head">')) {
+    const start = body.indexOf('<section class="wrap page-head">');
+    const end = body.indexOf("</section>", start);
+    const inner = body.slice(start + '<section class="wrap page-head">'.length, end);
+    const img = banner || SEASON_IMG;
+    body = `<section class="page-banner" style="background-image:url('${img}')"><div class="wrap">${crumbHtml.replace(' wrap"', '"')}${inner}</div></section>` + body.slice(end + "</section>".length);
+    body = body.replace('<section class="wrap">', '<section class="wrap page-body">');
+    crumbsOut = "";
+  }
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -114,11 +142,12 @@ ${noindex ? '<meta name="robots" content="noindex">' : ""}
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${canonical}">
-<meta name="theme-color" content="#2f5d34">
+<meta name="theme-color" content="#d23c2c">
+<meta property="og:image" content="${SITE.url}${banner || SEASON_IMG}">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 ${ld}
 </head>
@@ -132,19 +161,20 @@ ${ld}
 <a href="/farmers-markets/">Farmers Markets</a>
 <a href="/in-season/">In Season</a>
 </nav>
+<a class="btn-add" href="/add-your-farm/">Add your farm</a>
 </div></header>
-${crumbHtml}
+${crumbsOut}
 <main>
 ${body}
 </main>
 <footer class="site-foot"><div class="wrap">
 <div class="cols">
-<div style="max-width:340px"><strong>${esc(SITE.name)}</strong><p>${esc(SITE.tagline)}</p><p>Listings start from the public USDA Local Food Directories. Hours and seasons change, so please confirm with the farm before you go.</p></div>
-<div><strong>Browse</strong><ul>${stateData.map((s) => `<li><a href="/${s.slug}/">${esc(s.name)}</a></li>`).join("")}<li><a href="/in-season/">What's in season</a></li></ul></div>
-<div><strong>Categories</strong><ul>${CATEGORIES.filter((c) => pages.length === 0 || true).slice(0, 6).map((c) => `<li><a href="/${c.slug}/">${esc(c.name)}</a></li>`).join("")}</ul></div>
-<div><strong>Site</strong><ul><li><a href="/about/">About</a></li><li><a href="/add-your-farm/">Add or update a farm</a></li><li><a href="/editorial-policy/">Editorial policy</a></li><li><a href="/contact/">Contact</a></li><li><a href="/privacy/">Privacy</a></li><li><a href="/terms/">Terms</a></li></ul></div>
+<div><a class="logo" href="/" style="margin-bottom:10px">${ICON}Farm Day <span>Trips</span></a><p>${esc(SITE.tagline)}</p><p>Listings start from the public USDA Local Food Directories. Hours and seasons change, so check with the farm before you go.</p></div>
+<div><strong>States</strong><ul>${stateData.slice(0, 7).map((s) => `<li><a href="/${s.slug}/">${esc(s.name)}</a></li>`).join("")}<li><a href="/states/">All states</a></li></ul></div>
+<div><strong>Farm trips</strong><ul>${CATEGORIES.map((c) => `<li><a href="/${c.slug}/">${esc(c.name)}</a></li>`).join("")}</ul></div>
+<div><strong>About</strong><ul><li><a href="/about/">About us</a></li><li><a href="/add-your-farm/">Add or update a farm</a></li><li><a href="/editorial-policy/">Editorial policy</a></li><li><a href="/in-season/">What's in season</a></li><li><a href="/contact/">Contact</a></li><li><a href="/privacy/">Privacy</a></li><li><a href="/terms/">Terms</a></li></ul></div>
 </div>
-<p style="margin-top:20px">&copy; ${NOW.getFullYear()} ${esc(SITE.name)}</p>
+<div class="base"><span>&copy; ${NOW.getFullYear()} ${esc(SITE.name)}</span><span>Farm data: USDA Local Food Directories</span></div>
 </div></footer>
 </body>
 </html>
@@ -155,19 +185,53 @@ function tagsFor(l) {
   return l.categories.filter((c) => CAT[c]).slice(0, 4).map((c) => `<span class="tag${["christmas-tree-farms", "pumpkin-patches"].includes(c) ? " alt" : ""}">${esc(CAT[c].short)}</span>`).join("");
 }
 
+const TODAY = BUILD_DATE;
+const MONTH_IDX = Object.fromEntries(MONTHS.map((m, i) => [m, i + 1]));
+function monthsCover(text, month) {
+  const m = String(text || "").match(/^(\w+)(?: to (\w+))?$/);
+  if (!m || !MONTH_IDX[m[1]]) return false;
+  const a = MONTH_IDX[m[1]], b = MONTH_IDX[m[2]] || a;
+  return a <= b ? month >= a && month <= b : month >= a || month <= b;
+}
+function primaryCat(l) {
+  return ["christmas-tree-farms", "pumpkin-patches", "apple-orchards", "strawberry-picking", "berry-picking", "corn-mazes", "u-pick-farms", "farmers-markets", "farm-stands"].find((c) => l.categories.includes(c)) || null;
+}
+function seasonStatus(l) {
+  const dated = (l.seasons || []).filter((x) => x.from);
+  if (dated.some((x) => x.from <= TODAY && x.to >= TODAY)) return { cls: "open", text: "Open this season" };
+  const next = dated.filter((x) => x.from > TODAY).sort((a, b) => a.from.localeCompare(b.from))[0];
+  if (next) return { cls: "", text: "Opens " + new Date(next.from + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) };
+  if ((l.seasons || []).some((x) => x.months && monthsCover(x.months, MONTH))) return { cls: "open", text: "Open this season" };
+  const c = CAT[primaryCat(l)];
+  if (c && !["farmers-markets", "farm-stands", "u-pick-farms"].includes(c.slug) && c.season.includes(MONTH)) return { cls: "", text: "In season" };
+  return null;
+}
+function nextDates(l) {
+  const fmt = (d) => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const s = (l.seasons || []).filter((x) => x.from && x.to >= TODAY).sort((a, b) => a.from.localeCompare(b.from))[0];
+  return s ? `${fmt(s.from)} - ${fmt(s.to)}` : "";
+}
+
 function card(l, showState = false) {
-  const where = [l.street, l.city, showState ? l.state : null].filter(Boolean).join(", ");
-  const nameHtml = l.url ? `<a href="${l.url}">${esc(l.name)}</a>` : esc(l.name);
-  const blurb = l.description ? `<p style="margin:0;font-size:.93rem">${esc(l.description.length > 150 ? l.description.slice(0, 147).replace(/\s+\S*$/, "") + "..." : l.description)}</p>` : "";
-  const img = `<img class="thumb${l.photo ? "" : " art"}" src="${l.img}" alt="${l.photo ? esc(l.name) : ""}" loading="lazy" width="360" height="200">`;
-  return `<article class="card">
-${l.url ? `<a href="${l.url}" tabindex="-1" aria-hidden="true">${img}</a>` : img}
-<h3>${nameHtml}</h3>
-<div class="addr">${esc(where || l.stateName)}${l.zip ? " " + esc(l.zip) : ""}</div>
-${l.phone ? `<div class="addr"><a href="tel:${l.phone.replace(/\D/g, "")}">${esc(l.phone)}</a></div>` : ""}
-<div class="tags">${tagsFor(l)}</div>
-${blurb}
-<div class="more">${l.url ? `<a href="${l.url}">View details</a> &middot; ` : ""}<a href="${l.mapUrl}" rel="nofollow noopener" target="_blank">Directions</a>${!l.url && (l.website || l.facebook) ? ` &middot; <a href="${esc(l.website || l.facebook)}" rel="nofollow noopener" target="_blank">Website</a>` : ""}</div>
+  const href = l.url || l.website || l.facebook || l.mapUrl;
+  const ext = !l.url;
+  const rel = ext ? ' rel="nofollow noopener" target="_blank"' : "";
+  const status = seasonStatus(l);
+  const pc = primaryCat(l);
+  const strip = [l.phone || "", nextDates(l)].filter(Boolean);
+  const text = l.description ? esc(l.description.length > 140 ? l.description.slice(0, 137).replace(/\s+\S*$/, "") + "..." : l.description) : "";
+  const where = [l.street, l.city, showState ? l.state : null].filter(Boolean).join(", ") + (l.zip ? " " + l.zip : "");
+  return `<article class="lcard">
+<a class="lcard-media" href="${esc(href)}"${rel} tabindex="-1" aria-hidden="true"><img src="${l.img}" alt="" loading="lazy" width="400" height="250">${status ? `<span class="badge ${status.cls}">${status.text}</span>` : ""}${strip.length ? `<span class="media-strip">${strip.map((x) => `<span>${esc(x)}</span>`).join("")}</span>` : ""}</a>
+<div class="lcard-body">
+<h3><a href="${esc(href)}"${rel}>${esc(l.name)}</a></h3>
+${text ? `<p class="lcard-text">${text}</p>` : ""}
+<p class="lcard-addr">${PIN}<span>${esc(where || l.stateName)}</span></p>
+</div>
+<div class="lcard-foot">
+<span class="lcard-cat"><span class="dot"><img src="${catIcon(pc)}" alt="" loading="lazy" width="36" height="36"></span><span><small>${esc(pc ? CAT[pc].short : l.type === "market" ? "Market" : "Farm")}</small><strong>${esc([l.city, l.state].filter(Boolean).join(", "))}</strong></span></span>
+${l.phone ? `<a class="pill" href="tel:${l.phone.replace(/\D/g, "")}">Call</a>` : `<a class="pill" href="${l.mapUrl}" rel="nofollow noopener" target="_blank">Directions</a>`}
+</div>
 </article>`;
 }
 
@@ -206,6 +270,7 @@ rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 copyFileSync("src/styles.css", OUT + "/styles.css");
 cpSync("src/img", OUT + "/img", { recursive: true });
+cpSync("src/photos-site", OUT + "/img/site", { recursive: true });
 if (existsSync("src/photos")) cpSync("src/photos", OUT + "/photos", { recursive: true });
 writeFileSync(OUT + "/favicon.svg", ICON.replace('width="26" height="26" ', 'xmlns="http://www.w3.org/2000/svg" '));
 
@@ -293,6 +358,7 @@ ${faqHtml(categoryFaqs(c, S.name, items, cities))}
 </section>`;
     write(path, layout({
       path,
+      banner: catImg(c.slug),
       title: `${c.name} in ${S.name} (${items.length} Listed)`,
       description: `${items.length} ${c.name.toLowerCase()} in ${S.name}${cities[0] ? `, including ${listJoin(cities.slice(0, 3).map((g) => g.name))}` : ""}. Addresses, directions and what to know before you go.`,
       crumbs: [stateCrumb, { name: c.name, path }],
@@ -344,7 +410,8 @@ ${listSection(items)}
 </section>`;
       write(cpath, layout({
         path: cpath,
-        title: `${c.name} in ${g.name}, ${S.st}`,
+        banner: catImg(c.slug),
+      title: `${c.name} in ${g.name}, ${S.st}`,
         description: `${plural(items.length, "place")} for ${c.name.toLowerCase()} in and around ${g.name}, ${S.name}, with addresses, directions and seasonal tips.`,
         crumbs: [stateCrumb, { name: g.name, path }, { name: c.name, path: cpath }],
         body: body2,
@@ -418,7 +485,7 @@ ${x.notes.map((n) => `<p>${esc(n)}</p>`).join("")}
 </section>
 <section class="wrap detail">
 <div>
-<figure class="hero-img${l.photo ? "" : " art"}"><img src="${l.img}" alt="${l.photo ? esc(l.name) : ""}" width="720" height="400">${l.photo ? `<figcaption>Photo shared by the farm in the USDA Local Food Directories</figcaption>` : ""}</figure>
+<figure class="hero-img${l.photo ? "" : " art"}"><img src="${l.img}" alt="${l.photo ? esc(l.name) : ""}" width="720" height="400">${l.photo ? `<figcaption>Image shared by the farm in the USDA Local Food Directories</figcaption>` : ""}</figure>
 <div class="box">
 <h2 style="margin-top:0">About ${esc(l.name)}</h2>
 <p>${esc(summary)}</p>
@@ -436,6 +503,7 @@ ${near.length ? `<h2>Nearby farm stops</h2><div class="grid">${near.map((x) => c
 </section>`;
   write(l.url, layout({
     path: l.url,
+    banner: catImg(primaryCat(l)),
     title: `${l.name} - ${[l.city, l.state].filter(Boolean).join(", ")}${l.phone || hoursSpec.length ? " | Hours, Phone & Directions" : ""}`,
     description: (summary.length > 155 ? summary.slice(0, 152).replace(/\s+\S*$/, "") + "..." : summary),
     crumbs,
@@ -463,7 +531,8 @@ ${featured.length ? `<h2>Featured listings</h2>${`<div class="grid">${featured.m
 </section>`;
   write(path, layout({
     path,
-    title: `${c.name} Near You: Find ${c.name} by State`,
+    banner: catImg(c.slug),
+      title: `${c.name} Near You: Find ${c.name} by State`,
     description: `Find ${c.name.toLowerCase()} by state and town, with addresses, directions and seasonal tips.`,
     crumbs: [{ name: c.name, path }],
     body,
@@ -490,39 +559,96 @@ ${featured.length ? `<h2>Featured listings</h2>${`<div class="grid">${featured.m
 // Home
 {
   const total = listings.length;
-  const featuredCats = CATEGORIES.map((c) => ({ c, n: listings.filter((l) => l.categories.includes(c.slug)).length })).filter((x) => x.n >= MIN);
-  const body = `<section class="wrap hero">
-<h1>Plan your next day at the farm</h1>
-<p class="lead">${esc(SITE.tagline)} ${total.toLocaleString()} farm stops listed so far.</p>
-<form class="search" role="search" onsubmit="return false">
-<input id="q" type="search" placeholder="Search a town, state or farm name" aria-label="Search farms" autocomplete="off">
-<button type="button" id="go">Search</button>
+  const HERO_IMG = MONTH >= 11 ? "/img/site/christmas-tree-picking.webp" : MONTH >= 9 ? "/img/site/pumpkins.webp" : "/img/site/strawberries.webp";
+  const catCounts = CATEGORIES.map((c) => ({ c, n: listings.filter((l) => l.categories.includes(c.slug)).length })).filter((x) => x.n >= MIN);
+
+  // Featured: the category in season right now, best listings first.
+  const featCat = inSeasonNow.find((c) => catCounts.some((x) => x.c === c)) || CAT["farmers-markets"];
+  const score = (l) => (l.realPhoto ? 5 : l.photo ? 1 : 0) + (seasonStatus(l) ? 3 : 0) + (l.phone ? 1 : 0) + (l.description ? 1 : 0);
+  const featured = listings.filter((l) => l.hasPage && l.categories.includes(featCat.slug)).sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name)).slice(0, 8);
+
+  // Season "tickets": what's on now and what's next.
+  const TICKETS = {
+    "christmas-tree-farms": { img: "/img/site/christmas-tree-decorated-sm.webp", title: "Cut your own Christmas tree", text: "Walk the rows, pick your tree and watch it get cut and wrapped.", when: "Late November to mid-December" },
+    "pumpkin-patches": { img: "/img/site/pumpkins-sm.webp", title: "Pumpkin patch season", text: "Hayrides, corn mazes and fields full of pumpkins to pick.", when: "Late September to October" },
+    "strawberry-picking": { img: "/img/site/strawberries-sm.webp", title: "Pick your own strawberries", text: "Sun-warm berries straight from the plant. Go early, fields pick out fast.", when: "April to June" },
+  };
+  const order = MONTH >= 11 || MONTH <= 2 ? ["christmas-tree-farms", "strawberry-picking"] : MONTH >= 9 ? ["pumpkin-patches", "christmas-tree-farms"] : ["strawberry-picking", "pumpkin-patches"];
+  const tickets = order.filter((k) => CAT[k] && catCounts.some((x) => x.c.slug === k));
+
+  const recent = listings.filter((l) => l.hasPage && l.updated && l.photo).sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 6);
+  const statePhoto = (S) => (S.items.filter((l) => l.realPhoto && l.hasPage).sort((a, b) => (PHOTO_SCORES[b.photo.slice(8, -5)] || 0) - (PHOTO_SCORES[a.photo.slice(8, -5)] || 0))[0] || {}).photo || SEASON_IMG;
+
+  const body = `<section class="hero" style="background-image:url('${HERO_IMG}')"><div class="wrap">
+<h1>Find your next day out at the farm</h1>
+<p class="lead">Pick-your-own fields, pumpkin patches, Christmas tree farms and farmers markets. ${total.toLocaleString()} farm stops across ${stateData.length} states, with hours and phone numbers.</p>
+<form class="searchbar" role="search" onsubmit="return false">
+<input id="q" type="search" placeholder="Town, farm name or type of farm" aria-label="Search farms" autocomplete="off">
+<select id="st" aria-label="State"><option value="">All states</option>${stateData.map((S) => `<option value="${S.st}">${esc(S.name)}</option>`).join("")}</select>
+<button class="btn" type="button" id="go">Search</button>
 </form>
-<div id="results" class="grid" style="margin-top:16px"></div>
-</section>
-<section class="wrap">
-${inSeasonNow.length ? `<h2>In season now: ${MONTHS[MONTH - 1]}</h2><div class="tiles">${inSeasonNow.filter((c) => featuredCats.some((x) => x.c === c)).map((c) => `<a class="tile" href="/${c.slug}/"><strong>${esc(c.name)}</strong><small>Typical season: ${esc(monthRange(c.season))}</small></a>`).join("")}</div>` : ""}
-<h2>Browse by state</h2>
-<div class="tiles">${stateData.map((s) => `<a class="tile" href="/${s.slug}/"><strong>${esc(s.name)}</strong><small>${plural(s.items.length, "farm stop")}</small></a>`).join("")}</div>
-<h2>Browse by type</h2>
-<div class="tiles">${featuredCats.map((x) => `<a class="tile" href="/${x.c.slug}/"><strong>${esc(x.c.name)}</strong><small>${x.n} listed</small></a>`).join("")}</div>
-<h2>How we build this directory</h2>
-<p class="prose">We start from the USDA Local Food Directories, a public list that farms and markets keep up to date themselves, then organize it by state, town and season so you can plan a day out quickly. We add details as farms send them in. Spotted something out of date? <a href="/add-your-farm/">Let us know</a>.</p>
-</section>
+<div id="results" class="results" aria-live="polite"></div>
+</div></section>
+
+<div class="wrap cat-row"><nav class="cat-grid" aria-label="Farm types">
+${catCounts.map((x) => `<a class="cat-tile" href="/${x.c.slug}/"><span class="cat-icon"><img src="${catIcon(x.c.slug)}" alt="" width="60" height="60"></span><strong>${esc(x.c.name.replace(" & Farm Stores", ""))}</strong><small>${x.n.toLocaleString()} listed</small></a>`).join("")}
+</nav></div>
+
+<section class="section"><div class="wrap">
+<div class="section-head split"><div><h2>${esc(featCat.name)} to visit this season</h2><p>Farms with photos, phone numbers and this year's dates come first. Badges show which are open now and which open soon.</p></div><a class="btn ghost" href="/${featCat.slug}/">See all ${esc(featCat.name.toLowerCase())}</a></div>
+<div class="grid">${featured.map((l) => card(l, true)).join("\n")}</div>
+</div></section>
+
+<section class="section tint"><div class="wrap">
+<div class="section-head"><h2>Pick a state</h2><p>Every state page breaks down by town and by type of farm, so you can find what's close to home.</p></div>
+<div class="state-grid">${stateData.map((S) => `<a class="state-card" href="/${S.slug}/"><span class="ph"><img src="${statePhoto(S)}" alt="" loading="lazy" width="300" height="375"><b>${S.st}</b></span><strong>${esc(S.name)}</strong><small>${plural(S.items.length, "farm stop")}</small></a>`).join("")}</div>
+</div></section>
+
+<section class="section"><div class="wrap">
+<div class="section-head"><h2>Plan a farm day in three steps</h2><p>Farm seasons are short and change every year, so a little planning saves a wasted drive.</p></div>
+<div class="steps">
+<div class="step"><h3>Find a farm</h3><p>Search by town or browse a state to see farms, stands and markets nearby.</p></div>
+<div class="step"><h3>Check the season</h3><p>Look at the farm's dates and hours, then call ahead. Weather moves harvests every year.</p></div>
+<div class="step"><h3>Head out</h3><p>Tap for directions, bring cash just in case, and wear shoes that can get muddy.</p></div>
+</div>
+</div></section>
+
+${tickets.length ? `<section class="section tint"><div class="wrap">
+<div class="section-head split"><div><h2>Coming up on the farm calendar</h2><p>Typical seasons across our states. Each farm sets its own dates.</p></div><a class="btn ghost" href="/in-season/">Month-by-month guide</a></div>
+<div class="tickets">${tickets.map((k, i) => `<a class="ticket${i === 0 ? " red" : ""}" href="/${k}/"><div class="t-copy"><h3>${esc(TICKETS[k].title)}</h3><p>${esc(TICKETS[k].text)}</p><span class="t-date">${esc(TICKETS[k].when)}</span><span class="t-link">Browse ${catCounts.find((x) => x.c.slug === k).n} ${esc(CAT[k].many)}</span></div><img src="${TICKETS[k].img}" alt="" loading="lazy" width="600" height="400"></a>`).join("")}</div>
+</div></section>` : ""}
+
+<section class="section"><div class="wrap">
+<div class="section-head"><h2>Recently updated farms</h2><p>These farms refreshed their details in the USDA directory most recently.</p></div>
+<div class="mini-grid">${recent.map((l) => `<a class="mini" href="${l.url}"><img src="${l.img}" alt="" loading="lazy" width="78" height="78"><span><strong>${esc(l.name)}</strong><small>${esc([l.city, l.state].filter(Boolean).join(", "))}</small><small class="when">Updated ${new Date(l.updated + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}</small></span></a>`).join("")}</div>
+</div></section>
+
+<section class="band" style="background-image:url('/img/site/pumpkins.webp')"><div class="wrap">
+<div><h2>Run a farm? Get listed for free.</h2><p>Families search here for places to pick fruit, choose a pumpkin or cut a tree. Send us your details and we'll add or update your listing at no cost.</p>
+<div class="btns"><a class="btn" href="/add-your-farm/">Add your farm</a><a class="btn light" href="/editorial-policy/">How listings work</a></div></div>
+<ul class="checklist"><li>Farm name and address</li><li>What visitors can pick, buy or do</li><li>Season dates and opening hours</li><li>Phone number and website</li><li>A photo of your farm</li></ul>
+</div></section>
+
+<nav class="quick" aria-label="Quick links"><a href="/states/">Browse by state</a><a href="/in-season/">What's in season</a><a href="/add-your-farm/">Add your farm</a></nav>
+
 <script>
-(function(){var idx=null,q=document.getElementById('q'),out=document.getElementById('results');
+(function(){var idx=null,q=document.getElementById('q'),st=document.getElementById('st'),out=document.getElementById('results');
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function run(){var t=q.value.trim().toLowerCase();if(t.length<2){out.innerHTML='';return}
-var go=function(){var r=idx.filter(function(x){return x.k.indexOf(t)>-1}).slice(0,24);
-out.innerHTML=r.length?r.map(function(x){return '<a class="tile" href="'+x.u+'"><strong>'+esc(x.n)+'</strong><small>'+esc(x.d)+'</small></a>'}).join(''):'<p>No matches yet. Try a nearby town or the state name.</p>'};
+function run(){var t=q.value.trim().toLowerCase(),s=st.value;
+if(t.length<2&&!s){out.innerHTML='';return}
+if(t.length<2&&s){location.href='/'+st.options[st.selectedIndex].text.toLowerCase().replace(/\s+/g,'-')+'/';return}
+var go=function(){var r=idx.filter(function(x){return x.k.indexOf(t)>-1&&(!s||x.s===s)}).slice(0,10);
+out.innerHTML=r.length?r.map(function(x){return '<a href="'+x.u+'"><span>'+esc(x.n)+'</span><small>'+esc(x.d)+'</small></a>'}).join(''):'<p>No matches. Try a nearby town or pick a state.</p>'};
 if(idx)return go();fetch('/search-index.json').then(function(r){return r.json()}).then(function(d){idx=d;go()})}
-q.addEventListener('input',run);document.getElementById('go').addEventListener('click',run)})();
+q.addEventListener('input',run);st.addEventListener('change',function(){if(q.value.trim().length>=2)run()});document.getElementById('go').addEventListener('click',run);
+q.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();var a=out.querySelector('a');if(a)location.href=a.href;else run()}})})();
 </script>`;
   write("/", layout({
     path: "/",
     title: "Farm Day Trips: U-Pick Farms, Pumpkin Patches, Christmas Tree Farms & Markets",
-    description: `${SITE.tagline} Browse ${total.toLocaleString()} farm stops by state, town and season.`,
+    description: `Find pick-your-own farms, pumpkin patches, Christmas tree farms and farmers markets near you. ${total.toLocaleString()} farm stops with hours, phone numbers and directions.`,
     body,
+    banner: HERO_IMG,
     schema: [{ "@context": "https://schema.org", "@type": "WebSite", name: SITE.name, url: SITE.url + "/" }],
   }));
 }
@@ -531,11 +657,11 @@ q.addEventListener('input',run);document.getElementById('go').addEventListener('
 {
   const idx = [];
   for (const S of stateData) {
-    idx.push({ n: S.name, d: `${S.items.length} farm stops`, u: `/${S.slug}/`, k: S.name.toLowerCase() + " " + S.st.toLowerCase() });
-    for (const g of S.cities) idx.push({ n: `${g.name}, ${S.st}`, d: `${g.items.length} farm stops`, u: `/${S.slug}/${g.slug}/`, k: `${g.name} ${S.name} ${S.st}`.toLowerCase() });
-    for (const x of S.cats) idx.push({ n: `${x.c.name} in ${S.name}`, d: `${x.items.length} places`, u: `/${S.slug}/${x.c.slug}/`, k: `${x.c.name} ${x.c.short} ${S.name}`.toLowerCase() });
+    idx.push({ s: S.st, n: S.name, d: `${S.items.length} farm stops`, u: `/${S.slug}/`, k: S.name.toLowerCase() + " " + S.st.toLowerCase() });
+    for (const g of S.cities) idx.push({ s: S.st, n: `${g.name}, ${S.st}`, d: `${g.items.length} farm stops`, u: `/${S.slug}/${g.slug}/`, k: `${g.name} ${S.name} ${S.st}`.toLowerCase() });
+    for (const x of S.cats) idx.push({ s: S.st, n: `${x.c.name} in ${S.name}`, d: `${x.items.length} places`, u: `/${S.slug}/${x.c.slug}/`, k: `${x.c.name} ${x.c.short} ${S.name}`.toLowerCase() });
   }
-  for (const l of listings.filter((x) => x.hasPage)) idx.push({ n: l.name, d: [l.city, l.state].filter(Boolean).join(", "), u: l.url, k: `${l.name} ${l.city || ""} ${l.state}`.toLowerCase() });
+  for (const l of listings.filter((x) => x.hasPage)) idx.push({ s: l.state, n: l.name, d: [l.city, l.state].filter(Boolean).join(", "), u: l.url, k: `${l.name} ${l.city || ""} ${l.state}`.toLowerCase() });
   writeFileSync(OUT + "/search-index.json", JSON.stringify(idx));
 }
 

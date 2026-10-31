@@ -69,6 +69,9 @@ let imagePath = null;
 }
 
 const bulk = JSON.parse(readFileSync("data/usda.json", "utf8"));
+// Detail score per photo (greyscale entropy): logos score low, real photos high.
+const scoreFile = "data/photo-scores.json";
+const scores = existsSync(scoreFile) ? JSON.parse(readFileSync(scoreFile, "utf8")) : {};
 let photos = 0;
 
 for (const st of onlyStates) {
@@ -144,10 +147,12 @@ for (const st of onlyStates) {
         await img.resize({ width: 720, height: 540, fit: "inside", withoutEnlargement: true }).webp({ quality: 68 }).toFile(file);
         e.photo = `/photos/${e.key}.webp`;
         photos++;
+        try { scores[e.key] = +(await sharp(file).stats()).entropy.toFixed(2); } catch {}
       } catch {}
     });
   }
 
+  writeFileSync(scoreFile, JSON.stringify(scores));
   const enriched = Object.values(out).filter((e) => Object.keys(e).length > 1);
   writeFileSync(prevFile, JSON.stringify(Object.fromEntries(enriched.map((e) => [e.key, e]))) + "\n");
   console.log(st, "enriched:", enriched.length,
