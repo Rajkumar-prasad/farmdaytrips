@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-save sharp@0.33
-      - run: PHOTOS_ONLY=1 node scripts/enrich-usda.mjs
+      - run: PHOTOS_ONLY=1 FORCE_PHOTOS=1 node scripts/enrich-usda.mjs
       - name: Commit photos
         run: |
           git config user.name "farmdaytrips-bot"

@@ -133,7 +133,7 @@ for (const st of onlyStates) {
     const withImg = Object.values(out).filter((e) => e.image);
     await pool(withImg, 3, async (e) => {
       const file = `src/photos/${e.key}.webp`;
-      if (existsSync(file) && prev[e.key]?.image === e.image) { e.photo = `/photos/${e.key}.webp`; return; }
+      if (process.env.FORCE_PHOTOS !== "1" && existsSync(file) && prev[e.key]?.image === e.image) { e.photo = `/photos/${e.key}.webp`; return; }
       if (photos >= MAX_PHOTOS) return;
       const buf = await get(`${imagePath}/${encodeURIComponent(e.image)}`, false, 2);
       if (!buf || buf.length < 2000) return;
@@ -141,7 +141,7 @@ for (const st of onlyStates) {
         const img = sharp(buf).rotate();
         const meta = await img.metadata();
         if ((meta.width || 0) < 240) return;
-        await img.resize({ width: 720, height: 480, fit: "cover", withoutEnlargement: true }).webp({ quality: 68 }).toFile(file);
+        await img.resize({ width: 720, height: 540, fit: "inside", withoutEnlargement: true }).webp({ quality: 68 }).toFile(file);
         e.photo = `/photos/${e.key}.webp`;
         photos++;
       } catch {}
