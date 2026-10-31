@@ -2,7 +2,7 @@
 // Run: node scripts/build.mjs   ->  writes the site into public/
 import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, existsSync, cpSync } from "node:fs";
 import { dirname } from "node:path";
-import { STATES, CATEGORIES, CAT, MONTHS, slugify, esc, listJoin } from "./lib.mjs";
+import { STATES, CATEGORIES, CAT, MONTHS, slugify, esc, listJoin, countOf } from "./lib.mjs";
 
 const config = JSON.parse(readFileSync("data/config.json", "utf8"));
 const SITE = config.site;
@@ -126,9 +126,11 @@ ${ld}
 <header class="site-head"><div class="wrap">
 <a class="logo" href="/">${ICON}Farm Day <span>Trips</span></a>
 <nav class="nav" aria-label="Main">
-${stateData.map((s) => `<a href="/${s.slug}/">${esc(s.name)}</a>`).join("\n")}
+<a href="/states/">States</a>
 <a href="/christmas-tree-farms/">Christmas Trees</a>
+<a href="/pumpkin-patches/">Pumpkin Patches</a>
 <a href="/farmers-markets/">Farmers Markets</a>
+<a href="/in-season/">In Season</a>
 </nav>
 </div></header>
 ${crumbHtml}
@@ -306,7 +308,7 @@ ${faqHtml(categoryFaqs(c, S.name, items, cities))}
       ? S.cities.filter((o) => o !== g && o.center).map((o) => ({ o, d: dist(g.center, o.center) })).sort((a, b) => a.d - b.d).slice(0, 8)
       : [];
     const typeCounts = CATEGORIES.map((c) => ({ c, n: g.items.filter((l) => l.categories.includes(c.slug)).length })).filter((x) => x.n);
-    const intro = `There ${g.items.length === 1 ? "is" : "are"} ${plural(g.items.length, "farm stop")} listed in and around ${g.name}, ${S.name}${typeCounts.length ? `, including ${listJoin(typeCounts.slice(0, 3).map((x) => `${x.n} ${x.c.short.toLowerCase()}`))}` : ""}.${nearby.length ? ` Nearby towns with more options include ${listJoin(nearby.slice(0, 3).map((x) => x.o.name))}.` : ""}`;
+    const intro = `There ${g.items.length === 1 ? "is" : "are"} ${plural(g.items.length, "farm stop")} listed in and around ${g.name}, ${S.name}${typeCounts.length ? `, including ${listJoin(typeCounts.slice(0, 3).map((x) => countOf(x.n, x.c)))}` : ""}.${nearby.length ? ` Nearby towns with more options include ${listJoin(nearby.slice(0, 3).map((x) => x.o.name))}.` : ""}`;
     const body = `<section class="wrap page-head">
 <h1>Farms &amp; Farmers Markets in ${esc(g.name)}, ${esc(S.st)}</h1>
 <p>${esc(intro)}</p>
@@ -592,6 +594,16 @@ prose("/terms/", "Terms of Use", "Terms for using the Farm Day Trips website.", 
 <p>Visiting a farm is at your own risk, and each farm sets its own rules. We aren't responsible for the products, services or safety of any listed business.</p>
 <p>Listing data from the USDA Local Food Directories is public information. The site design and original text are owned by Farm Day Trips.</p>
 <p>Questions: <a href="mailto:${SITE.email}">${SITE.email}</a>.</p>`);
+
+// All states
+write("/states/", layout({
+  path: "/states/",
+  title: "Farm Day Trips by State: Farms, U-Pick & Farmers Markets",
+  description: `Browse ${listings.length.toLocaleString()} farms, u-pick fields, pumpkin patches, Christmas tree farms and farmers markets across ${stateData.length} states.`,
+  crumbs: [{ name: "States", path: "/states/" }],
+  body: `<section class="wrap page-head"><h1>Browse farms by state</h1><p>We currently cover ${stateData.length} states, with more on the way.</p></section>
+<section class="wrap"><div class="tiles">${stateData.map((S) => `<a class="tile" href="/${S.slug}/"><strong>${esc(S.name)}</strong><small>${plural(S.items.length, "farm stop")} &middot; ${plural(S.cities.length, "town")}</small></a>`).join("")}</div></section>`,
+}));
 
 // 404
 write("/404.html", layout({
