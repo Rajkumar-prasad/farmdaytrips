@@ -1,0 +1,11 @@
+{
+  "site": {
+    "name": "Farm Day Trips",
+    "domain": "farmdaytrips.com",
+    "url": "https://farmdaytrips.com",
+    "email": "hello@farmdaytrips.com",
+    "tagline": "Find u-pick farms, pumpkin patches, Christmas tree farms and farmers markets near you."
+  },
+  "states": ["PA", "NC"],
+  "minListingsPerPage": 3
+}
