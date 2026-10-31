@@ -25,5 +25,5 @@ No framework, no dependencies. Node builds plain HTML into `public/`, and Vercel
 ## Quality rules
 
 - City, category and city+category pages are only created with 3 or more listings.
-- A farm gets its own page only when it has a real description; others appear as cards with a directions link.
+- A farm gets its own page only when it has real details (a description, or contact info plus seasons/hours or a photo); others appear as cards with phone, directions and website links.
 - Ad slots (`.ad-slot`) are empty until an ad network is approved.
