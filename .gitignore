@@ -2,3 +2,4 @@ node_modules/
 .vercel/
 public/
 .DS_Store
+data/listings.json

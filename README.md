@@ -9,15 +9,17 @@ No framework, no dependencies. Node builds plain HTML into `public/`, and Vercel
 |---|---|
 | `data/usda.json` | All US listings from the USDA Local Food Directories (refreshed monthly by GitHub Actions) |
 | `data/config.json` | Site name, email, **which states are live**, minimum listings per page |
-| `data/listings.json` | Listings for the live states, made by `scripts/import.mjs` |
+| `data/listings.json` | Listings for the live states, made by `scripts/import.mjs` at build time (not committed) |
+| `data/enrich/` | Phone, website, social links, seasons and hours per state (GitHub Action) |
+| `src/photos/` | Farm photos from USDA, resized to WebP (GitHub Action) |
 | `data/manual.json` | Farms we add or fix by hand (same fields as listings.json) |
 | `scripts/build.mjs` | Generates every page, sitemap, robots.txt and search index |
 | `src/styles.css` | Site design |
 
 ## Common tasks
 
-- **Add a state:** add its code to `states` in `data/config.json`, then `node scripts/import.mjs && node scripts/build.mjs`.
-- **Rebuild locally:** `node scripts/build.mjs` (output in `public/`, not committed; Vercel builds it on every push).
+- **Add a state:** add its code to `states` in `data/config.json` and push. The enrich job collects contacts, hours and photos, and Vercel rebuilds.
+- **Rebuild locally:** `node scripts/import.mjs && node scripts/build.mjs` (output in `public/`, not committed; Vercel builds it on every push).
 - **Refresh USDA data:** GitHub > Actions > "Fetch USDA farm data" > Run workflow (also runs on the 1st of each month).
 
 ## Quality rules
